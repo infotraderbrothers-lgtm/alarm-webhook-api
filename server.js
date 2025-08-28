@@ -54,12 +54,13 @@ class AlarmWebhookAPI {
         // Root route for health check
         this.app.get('/', (req, res) => {
             res.json({
-                service: 'Alarm Webhook API',
+                service: 'Alarm Webhook API with Make.com Integration',
                 status: 'running',
                 timestamp: new Date().toISOString(),
                 activeAlarms: this.alarms.size,
+                makeWebhook: 'https://hook.eu2.make.com/6keyrp44odhz8cbxbz7owjjl3t3ag945',
                 endpoints: {
-                    'POST /api/alarms': 'Create new alarm',
+                    'POST /api/alarms': 'Create new alarm (webhookUrl optional)',
                     'GET /api/alarms': 'List all alarms',
                     'GET /api/alarms/:id': 'Get specific alarm',
                     'DELETE /api/alarms/:id': 'Delete alarm',
@@ -74,17 +75,18 @@ class AlarmWebhookAPI {
             try {
                 const { contactName, email, phone, datetime, webhookUrl, repeatDays } = req.body;
                 
-                if (!contactName || !datetime || !webhookUrl) {
+                if (!contactName || !datetime) {
                     return res.status(400).json({
-                        error: 'Missing required fields: contactName, datetime, webhookUrl',
+                        error: 'Missing required fields: contactName, datetime',
                         example: {
                             contactName: 'John Doe',
-                            email: 'john@example.com',
-                            phone: '+1234567890',
+                            email: 'john@example.com (optional)',
+                            phone: '+1234567890 (optional)',
                             datetime: '2025-08-27T15:30:00.000Z',
-                            webhookUrl: 'https://webhook.site/your-id',
-                            repeatDays: ['monday', 'friday']
-                        }
+                            webhookUrl: 'https://webhook.site/your-id (optional)',
+                            repeatDays: ['monday', 'friday'] // optional
+                        },
+                        note: 'All alarms automatically send to Make.com webhook. Custom webhookUrl is optional.'
                     });
                 }
                 
@@ -101,7 +103,7 @@ class AlarmWebhookAPI {
                     email: email || '',
                     phone: phone || '',
                     datetime,
-                    webhookUrl,
+                    webhookUrl: webhookUrl || '', // Optional now
                     repeatDays: repeatDays || []
                 });
                 
@@ -109,7 +111,11 @@ class AlarmWebhookAPI {
                     success: true,
                     alarmId,
                     message: 'Alarm created successfully',
-                    scheduledFor: targetDate.toISOString()
+                    scheduledFor: targetDate.toISOString(),
+                    webhooks: {
+                        makeWebhook: 'Will be sent to Make.com',
+                        customWebhook: webhookUrl ? `Will also be sent to: ${webhookUrl}` : 'None specified'
+                    }
                 });
             } catch (error) {
                 console.error('Error creating alarm:', error);
@@ -130,7 +136,8 @@ class AlarmWebhookAPI {
             res.json({
                 success: true,
                 count: alarmsList.length,
-                alarms: alarmsList
+                alarms: alarmsList,
+                note: 'All alarms send to Make.com webhook: https://hook.eu2.make.com/6keyrp44odhz8cbxbz7owjjl3t3ag945'
             });
         });
         
@@ -165,16 +172,16 @@ class AlarmWebhookAPI {
             }
         });
         
-        // Test webhook
+        // Test Make.com webhook
         this.app.post('/api/test-webhook', async (req, res) => {
             try {
-                const { webhookUrl } = req.body;
-                if (!webhookUrl) {
-                    return res.status(400).json({ error: 'webhookUrl is required' });
-                }
-                
-                const result = await this.testWebhook(webhookUrl);
-                res.json(result);
+                const makeWebhookUrl = 'https://hook.eu2.make.com/6keyrp44odhz8cbxbz7owjjl3t3ag945';
+                const result = await this.testWebhook(makeWebhookUrl);
+                res.json({
+                    ...result,
+                    testedWebhook: makeWebhookUrl,
+                    note: 'This tests your Make.com webhook endpoint'
+                });
             } catch (error) {
                 console.error('Error testing webhook:', error);
                 res.status(500).json({ error: 'Internal server error' });
@@ -190,7 +197,8 @@ class AlarmWebhookAPI {
                 timestamp: new Date().toISOString(),
                 uptime: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${Math.floor(uptime % 60)}s`,
                 activeAlarms: this.alarms.size,
-                activeCronJobs: this.cronJobs.size
+                activeCronJobs: this.cronJobs.size,
+                makeWebhook: 'https://hook.eu2.make.com/6keyrp44odhz8cbxbz7owjjl3t3ag945'
             });
         });
     }
@@ -210,6 +218,7 @@ class AlarmWebhookAPI {
         this.scheduleAlarm(alarm);
         
         console.log(`✅ Created alarm ${alarmId} for ${alarm.contactName} at ${alarm.datetime}`);
+        console.log(`📡 Will send to Make.com webhook + ${alarm.webhookUrl ? 'custom webhook' : 'no custom webhook'}`);
         return alarmId;
     }
     
@@ -318,45 +327,81 @@ class AlarmWebhookAPI {
         const triggerTime = new Date().toISOString();
         console.log(`🚨 ALARM TRIGGERED: ${alarm.id} - ${alarm.contactName} at ${triggerTime}`);
         
-        try {
-            // Send webhook
-            const payload = {
-                type: 'alarm_triggered',
-                alarm: {
-                    id: alarm.id,
-                    contactName: alarm.contactName,
-                    email: alarm.email,
-                    phone: alarm.phone,
-                    scheduledTime: alarm.datetime,
-                    triggeredAt: triggerTime,
-                    triggeredCount: alarm.triggeredCount + 1
-                },
-                metadata: {
-                    source: 'alarm-webhook-api',
-                    version: '1.0'
-                }
-            };
-            
-            const response = await fetch(alarm.webhookUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'AlarmWebhookAPI/1.0'
-                },
-                body: JSON.stringify(payload),
-                timeout: 10000 // 10 second timeout
-            });
-            
-            if (response.ok) {
-                console.log(`✅ Webhook sent successfully for alarm ${alarm.id} (HTTP ${response.status})`);
-                alarm.triggeredCount++;
-                alarm.lastTriggered = triggerTime;
-            } else {
-                const responseText = await response.text();
-                console.error(`❌ Webhook failed for alarm ${alarm.id}: HTTP ${response.status} - ${responseText}`);
+        // Create payload for webhooks
+        const payload = {
+            type: 'alarm_triggered',
+            alarm: {
+                id: alarm.id,
+                contactName: alarm.contactName,
+                email: alarm.email,
+                phone: alarm.phone,
+                scheduledTime: alarm.datetime,
+                triggeredAt: triggerTime,
+                triggeredCount: alarm.triggeredCount + 1
+            },
+            metadata: {
+                source: 'alarm-webhook-api',
+                version: '1.0'
             }
-        } catch (error) {
-            console.error(`❌ Error sending webhook for alarm ${alarm.id}:`, error.message);
+        };
+
+        // Define webhooks to send to
+        const webhooks = [
+            {
+                url: 'https://hook.eu2.make.com/6keyrp44odhz8cbxbz7owjjl3t3ag945',
+                name: 'Make.com Webhook',
+                required: true
+            }
+        ];
+
+        // Add custom webhook if provided
+        if (alarm.webhookUrl && alarm.webhookUrl.trim() !== '') {
+            webhooks.push({
+                url: alarm.webhookUrl,
+                name: 'Custom Webhook',
+                required: false
+            });
+        }
+
+        let successCount = 0;
+        let makeWebhookSuccess = false;
+
+        // Send to all webhooks
+        for (const webhook of webhooks) {
+            try {
+                console.log(`📡 Sending to ${webhook.name}: ${webhook.url}`);
+                
+                const response = await fetch(webhook.url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'AlarmWebhookAPI/1.0'
+                    },
+                    body: JSON.stringify(payload),
+                    timeout: 10000 // 10 second timeout
+                });
+                
+                if (response.ok) {
+                    console.log(`✅ ${webhook.name} sent successfully (HTTP ${response.status})`);
+                    successCount++;
+                    
+                    if (webhook.url === 'https://hook.eu2.make.com/6keyrp44odhz8cbxbz7owjjl3t3ag945') {
+                        makeWebhookSuccess = true;
+                    }
+                } else {
+                    const responseText = await response.text();
+                    console.error(`❌ ${webhook.name} failed: HTTP ${response.status} - ${responseText}`);
+                }
+            } catch (error) {
+                console.error(`❌ Error sending to ${webhook.name}:`, error.message);
+            }
+        }
+
+        // Update alarm stats if Make.com webhook succeeded
+        if (makeWebhookSuccess) {
+            alarm.triggeredCount++;
+            alarm.lastTriggered = triggerTime;
+            console.log(`📊 Updated alarm stats - Total webhooks sent: ${successCount}/${webhooks.length}`);
         }
         
         // Delete alarm if it's not recurring
@@ -447,13 +492,14 @@ class AlarmWebhookAPI {
         this.app.listen(port, '0.0.0.0', () => {
             console.log(`🚀 Alarm Webhook API Server running on port ${port}`);
             console.log(`🌐 Server time: ${new Date().toISOString()}`);
+            console.log(`🎯 Make.com webhook: https://hook.eu2.make.com/6keyrp44odhz8cbxbz7owjjl3t3ag945`);
             console.log(`📡 API Endpoints:`);
             console.log(`   GET  /                      - Service info`);
-            console.log(`   POST /api/alarms           - Create alarm`);
+            console.log(`   POST /api/alarms           - Create alarm (simple!)`);
             console.log(`   GET  /api/alarms           - List all alarms`);
             console.log(`   GET  /api/alarms/:id       - Get specific alarm`);
             console.log(`   DELETE /api/alarms/:id     - Delete alarm`);
-            console.log(`   POST /api/test-webhook     - Test webhook`);
+            console.log(`   POST /api/test-webhook     - Test Make.com webhook`);
             console.log(`   GET  /api/health           - Health check`);
         });
     }
