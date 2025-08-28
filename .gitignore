@@ -37,7 +37,3 @@ Thumbs.db
 # Logs
 logs/
 *.log
-
-# Keep alarms.json for production (it's your data file)
-# Comment out the line below if you want to exclude it
-# alarms.json
