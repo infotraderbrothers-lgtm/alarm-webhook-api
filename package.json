@@ -1,7 +1,7 @@
 {
   "name": "alarm-webhook-api",
   "version": "1.0.0",
-  "description": "Backend API for scheduling alarms that trigger webhooks - 24/7 service",
+  "description": "24/7 Alarm Webhook API with Make.com Integration - Simplified",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -24,15 +24,10 @@
     "alarm",
     "webhook",
     "api",
-    "scheduler",
-    "cron",
-    "notification",
-    "backend"
+    "scheduler", 
+    "make.com",
+    "automation"
   ],
   "author": "Your Name",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/yourusername/alarm-webhook-api"
-  }
+  "license": "MIT"
 }
